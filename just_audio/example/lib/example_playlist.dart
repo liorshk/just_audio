@@ -25,46 +25,31 @@ class MyApp extends StatefulWidget {
 class MyAppState extends State<MyApp> with WidgetsBindingObserver {
   late AudioPlayer _player;
   final _playlist = ConcatenatingAudioSource(children: [
-    // Remove this audio source from the Windows and Linux version because it's not supported yet
-    if (kIsWeb ||
-        ![TargetPlatform.windows, TargetPlatform.linux]
-            .contains(defaultTargetPlatform))
-      ClippingAudioSource(
-        start: const Duration(seconds: 60),
-        end: const Duration(seconds: 90),
-        child: AudioSource.uri(Uri.parse(
-            "https://s3.amazonaws.com/scifri-episodes/scifri20181123-episode.mp3")),
-        tag: AudioMetadata(
-          album: "Science Friday",
-          title: "A Salute To Head-Scratching Science (30 seconds)",
-          artwork:
-              "https://media.wnyc.org/i/1400/1400/l/80/1/ScienceFriday_WNYCStudios_1400.jpg",
-        ),
-      ),
     AudioSource.uri(
       Uri.parse(
-          "https://s3.amazonaws.com/scifri-episodes/scifri20181123-episode.mp3"),
+          "https://storage.googleapis.com/curi-406812.appspot.com/191c168b-1525-40d2-9b04-6decabed242f.m3u8"),
       tag: AudioMetadata(
-        album: "Science Friday",
-        title: "A Salute To Head-Scratching Science",
+        album: "Stream 1",
+        title: "Stream 1",
         artwork:
             "https://media.wnyc.org/i/1400/1400/l/80/1/ScienceFriday_WNYCStudios_1400.jpg",
       ),
     ),
     AudioSource.uri(
-      Uri.parse("https://s3.amazonaws.com/scifri-segments/scifri201711241.mp3"),
+      Uri.parse(
+          "https://storage.googleapis.com/curi-406812.appspot.com/99115ae6-e8ce-4e62-bf17-d01fe97bafb1.m3u8"),
       tag: AudioMetadata(
-        album: "Science Friday",
-        title: "From Cat Rheology To Operatic Incompetence",
+        album: "Stream 2",
+        title: "Stream 2",
         artwork:
             "https://media.wnyc.org/i/1400/1400/l/80/1/ScienceFriday_WNYCStudios_1400.jpg",
       ),
     ),
     AudioSource.uri(
-      Uri.parse("asset:///audio/nature.mp3"),
+      Uri.parse("https://storage.googleapis.com/curi-406812.appspot.com/008c1e89-44c2-4424-b505-49ecfc03a7c1.m3u8"),
       tag: AudioMetadata(
-        album: "Public Domain",
-        title: "Nature Sounds",
+        album: "Stream 3",
+        title: "Stream 3",
         artwork:
             "https://media.wnyc.org/i/1400/1400/l/80/1/ScienceFriday_WNYCStudios_1400.jpg",
       ),
