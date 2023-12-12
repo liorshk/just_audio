@@ -25,12 +25,29 @@ class MyApp extends StatefulWidget {
 class MyAppState extends State<MyApp> with WidgetsBindingObserver {
   late AudioPlayer _player;
   final _playlist = ConcatenatingAudioSource(children: [
+
+    AudioSource.uri(
+      Uri.parse("https://storage.googleapis.com/curi-406812.appspot.com/03d1538b-9edd-4937-9e27-3e38b91e754b.m3u8"),
+      tag: AudioMetadata(
+        album: "Stream 4 - With EndList",
+        title: "Stream 4 - With EndList",
+        artwork:
+            "https://media.wnyc.org/i/1400/1400/l/80/1/ScienceFriday_WNYCStudios_1400.jpg",
+      )),
+      AudioSource.uri(
+      Uri.parse("https://storage.googleapis.com/curi-406812.appspot.com/af736d4f-3b03-4c90-86ec-d4b55eaedf4c.m3u8"),
+      tag: AudioMetadata(
+        album: "Stream 5 - With EndList",
+        title: "Stream 5 - With EndList",
+        artwork:
+            "https://media.wnyc.org/i/1400/1400/l/80/1/ScienceFriday_WNYCStudios_1400.jpg",
+      )),
     AudioSource.uri(
       Uri.parse(
           "https://storage.googleapis.com/curi-406812.appspot.com/191c168b-1525-40d2-9b04-6decabed242f.m3u8"),
       tag: AudioMetadata(
-        album: "Stream 1",
-        title: "Stream 1",
+        album: "Stream 1 - Without EndList",
+        title: "Stream 1 - Without EndList",
         artwork:
             "https://media.wnyc.org/i/1400/1400/l/80/1/ScienceFriday_WNYCStudios_1400.jpg",
       ),
@@ -39,8 +56,8 @@ class MyAppState extends State<MyApp> with WidgetsBindingObserver {
       Uri.parse(
           "https://storage.googleapis.com/curi-406812.appspot.com/99115ae6-e8ce-4e62-bf17-d01fe97bafb1.m3u8"),
       tag: AudioMetadata(
-        album: "Stream 2",
-        title: "Stream 2",
+        album: "Stream 2 - Without EndList",
+        title: "Stream 2 - Without EndList",
         artwork:
             "https://media.wnyc.org/i/1400/1400/l/80/1/ScienceFriday_WNYCStudios_1400.jpg",
       ),
@@ -48,8 +65,8 @@ class MyAppState extends State<MyApp> with WidgetsBindingObserver {
     AudioSource.uri(
       Uri.parse("https://storage.googleapis.com/curi-406812.appspot.com/008c1e89-44c2-4424-b505-49ecfc03a7c1.m3u8"),
       tag: AudioMetadata(
-        album: "Stream 3",
-        title: "Stream 3",
+        album: "Stream 3 - Without EndList",
+        title: "Stream 3 - Without EndList",
         artwork:
             "https://media.wnyc.org/i/1400/1400/l/80/1/ScienceFriday_WNYCStudios_1400.jpg",
       ),
