@@ -286,6 +286,7 @@
 }
 
 - (void)checkForDiscontinuity {
+    // NSLog(@"checkForDiscontinuity");
     if (!_playing || CMTIME_IS_VALID(_seekPos) || _processingState == completed) return;
     int position = [self getCurrentPosition];
     if (_processingState == buffering) {
@@ -314,12 +315,12 @@
 }
 
 - (void)enterBuffering:(NSString *)reason {
-    //NSLog(@"ENTER BUFFERING: %@", reason);
+    NSLog(@"ENTER BUFFERING: %@", reason);
     _processingState = buffering;
 }
 
 - (void)leaveBuffering:(NSString *)reason {
-    //NSLog(@"LEAVE BUFFERING: %@", reason);
+    NSLog(@"LEAVE BUFFERING: %@", reason);
     _processingState = ready;
 }
 
@@ -382,7 +383,7 @@
     [playerItem removeObserver:self forKeyPath:@"playbackBufferEmpty"];
     [playerItem removeObserver:self forKeyPath:@"playbackBufferFull"];
     [playerItem removeObserver:self forKeyPath:@"loadedTimeRanges"];
-    //[playerItem removeObserver:self forKeyPath:@"playbackLikelyToKeepUp"];
+    [playerItem removeObserver:self forKeyPath:@"playbackLikelyToKeepUp"];
     [[NSNotificationCenter defaultCenter] removeObserver:self name:AVPlayerItemDidPlayToEndTimeNotification object:playerItem];
     [[NSNotificationCenter defaultCenter] removeObserver:self name:AVPlayerItemFailedToPlayToEndTimeNotification object:playerItem];
     [[NSNotificationCenter defaultCenter] removeObserver:self name:AVPlayerItemPlaybackStalledNotification object:playerItem];
@@ -395,7 +396,7 @@
     [playerItem addObserver:self forKeyPath:@"playbackBufferEmpty" options:NSKeyValueObservingOptionNew context:nil];
     [playerItem addObserver:self forKeyPath:@"playbackBufferFull" options:NSKeyValueObservingOptionNew context:nil];
     [playerItem addObserver:self forKeyPath:@"loadedTimeRanges" options:NSKeyValueObservingOptionNew context:nil];
-    //[playerItem addObserver:self forKeyPath:@"playbackLikelyToKeepUp" options:NSKeyValueObservingOptionNew context:nil];
+    [playerItem addObserver:self forKeyPath:@"playbackLikelyToKeepUp" options:NSKeyValueObservingOptionNew context:nil];
     // Get notified when playback has reached the end
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onComplete:) name:AVPlayerItemDidPlayToEndTimeNotification object:playerItem];
     // Get notified when playback stops due to a failure (currently unused)
@@ -715,12 +716,18 @@
 
 - (void)onItemStalled:(NSNotification *)notification {
     //IndexedPlayerItem *playerItem = (IndexedPlayerItem *)notification.object;
-    //NSLog(@"onItemStalled");
+    NSLog(@"onItemStalled");
+    [self handleStalled];
+    // [self broadcastPlaybackEvent];
 }
 
 - (void)onFailToComplete:(NSNotification *)notification {
-    //IndexedPlayerItem *playerItem = (IndexedPlayerItem *)notification.object;
-    //NSLog(@"onFailToComplete");
+    IndexedPlayerItem *playerItem = (IndexedPlayerItem *)notification.object;
+    NSLog(@"onFailToComplete");
+    if (_playing && playerItem == _player.currentItem) {
+        [_player pause];
+        [self sendErrorForItem:playerItem];
+    }
 }
 
 - (void)onComplete:(NSNotification *)notification {
@@ -806,11 +813,12 @@
                 break;
             }
             case AVPlayerItemStatusFailed: {
-                //NSLog(@"AVPlayerItemStatusFailed");
+                NSLog(@"AVPlayerItemStatusFailed");
                 [self sendErrorForItem:playerItem];
                 break;
             }
             case AVPlayerItemStatusUnknown:
+                NSLog(@"AVPlayerItemStatusUnknown");
                 break;
         }
     } else if ([keyPath isEqualToString:@"playbackBufferEmpty"] || [keyPath isEqualToString:@"playbackBufferFull"]) {
@@ -854,16 +862,16 @@
             }
             switch (status) {
                 case AVPlayerTimeControlStatusPaused:
-                    //NSLog(@"AVPlayerTimeControlStatusPaused");
+                    NSLog(@"AVPlayerTimeControlStatusPaused");
                     break;
                 case AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate:
-                    //NSLog(@"AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate");
+                    NSLog(@"AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate");
                     if (_processingState != completed) {
                         [self enterBuffering:@"timeControlStatus"];
                         [self updatePosition];
                         [self broadcastPlaybackEvent];
                     } else {
-                        //NSLog(@"Ignoring wait signal because we reached the end");
+                        NSLog(@"Ignoring wait signal because we reached the end");
                     }
                     break;
                 case AVPlayerTimeControlStatusPlaying:
@@ -898,7 +906,7 @@
                 [self broadcastPlaybackEvent];
             }
         }
-        //NSLog(@"currentItem changed. _index=%d", _index);
+        // NSLog(@"currentItem changed. _index=%d", _index);
         _bufferUnconfirmed = YES;
         // If we've skipped or transitioned to a new item and we're not
         // currently in the middle of a seek
@@ -1171,6 +1179,29 @@
         if (_player) {
             _player.allowsExternalPlayback = allowsExternalPlayback;
         }
+    }
+}
+
+- (NSTimeInterval) availableDuration
+{
+    NSArray *loadedTimeRanges = [[_player currentItem] loadedTimeRanges];
+    CMTimeRange timeRange = [[loadedTimeRanges objectAtIndex:0] CMTimeRangeValue];
+    Float64 startSeconds = CMTimeGetSeconds(timeRange.start);
+    Float64 durationSeconds = CMTimeGetSeconds(timeRange.duration);
+    NSTimeInterval result = startSeconds + durationSeconds;
+    return result;
+}
+
+-(void)handleStalled {
+    if (!_playing) return;
+
+    NSLog(@"Handle stalled. Available: %lf", [self availableDuration]);
+
+    if (_player.currentItem.playbackLikelyToKeepUp || 
+            [self availableDuration] - CMTimeGetSeconds(_player.currentItem.currentTime) > 10.0) {
+        [_player play];
+    } else {
+        [self performSelector:@selector(handleStalled) withObject:nil afterDelay:0.5]; //try again
     }
 }
 
