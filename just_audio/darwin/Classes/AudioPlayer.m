@@ -46,6 +46,7 @@
     float _volume;
     BOOL _justAdvanced;
     NSDictionary<NSString *, NSObject *> *_icyMetadata;
+    NSDate *_stallDetectionStartTime;
 }
 
 - (instancetype)initWithRegistrar:(NSObject<FlutterPluginRegistrar> *)registrar playerId:(NSString*)idParam loadConfiguration:(NSDictionary *)loadConfiguration {
@@ -71,7 +72,7 @@
     _indexedAudioSources = nil;
     _order = nil;
     _orderInv = nil;
-    _seekPos = kCMTimeInvalid;
+    _seekPos = CMTimeMake(0, 1);
     _timeObserver = 0;
     _updatePosition = 0;
     _updateTime = 0;
@@ -104,6 +105,7 @@
     _volume = 1.0f;
     _justAdvanced = NO;
     _icyMetadata = @{};
+    _stallDetectionStartTime = nil;
     __weak __typeof__(self) weakSelf = self;
     [_methodChannel setMethodCallHandler:^(FlutterMethodCall* call, FlutterResult result) {
         [weakSelf handleMethodCall:call result:result];
@@ -115,7 +117,7 @@
     @try {
         NSDictionary *request = (NSDictionary *)call.arguments;
         if ([@"load" isEqualToString:call.method]) {
-            CMTime initialPosition = request[@"initialPosition"] == (id)[NSNull null] ? kCMTimeInvalid : CMTimeMake([request[@"initialPosition"] longLongValue], 1000000);
+            CMTime initialPosition = request[@"initialPosition"] == (id)[NSNull null] ? CMTimeMake(0, 1) : CMTimeMake([request[@"initialPosition"] longLongValue], 1000000);
             [self load:request[@"audioSource"] initialPosition:initialPosition initialIndex:request[@"initialIndex"] result:result];
         } else if ([@"play" isEqualToString:call.method]) {
             [self play:result];
@@ -222,7 +224,7 @@
     // Notify each new IndexedAudioSource that it's been attached to the player.
     for (int i = 0; i < [_indexedAudioSources count]; i++) {
         if (!_indexedAudioSources[i].isAttached) {
-            [_indexedAudioSources[i] attach:_player initialPos:kCMTimeInvalid];
+            [_indexedAudioSources[i] attach:_player initialPos:CMTimeMake(0, 1)];
         }
     }
     [self broadcastPlaybackEvent];
@@ -316,6 +318,9 @@
 
 - (void)enterBuffering:(NSString *)reason {
     NSLog(@"ENTER BUFFERING: %@", reason);
+    // if (reason == @"Waiting while evaluating buffering rate") {
+    //     [self handleStalled];
+    // }
     _processingState = buffering;
 }
 
@@ -367,7 +372,8 @@
         return -1;
     } else if (_indexedAudioSources && _indexedAudioSources.count > 0) {
         int v = (int)(1000 * CMTimeGetSeconds(_indexedAudioSources[_index].duration));
-        return v;
+        int maxDuration = MAX(v,[self getBufferedPosition]);
+        return maxDuration;
     } else {
         return 0;
     }
@@ -481,7 +487,7 @@
 }
 
 - (void)enqueueFrom:(int)index {
-    //NSLog(@"### enqueueFrom:%d", index);
+    // NSLog(@"### enqueueFrom:%d", index);
     _index = index;
 
     // Update the queue while keeping the currently playing item untouched.
@@ -673,7 +679,7 @@
     [self enqueueFrom:_index];
     // Notify each IndexedAudioSource that it's been attached to the player.
     for (int i = 0; i < [_indexedAudioSources count]; i++) {
-        [_indexedAudioSources[i] attach:_player initialPos:(i == _index ? initialPosition : kCMTimeInvalid)];
+        [_indexedAudioSources[i] attach:_player initialPos:(i == _index ? initialPosition : CMTimeMake(0, 1))];
     }
 
     if (_indexedAudioSources.count == 0 || !_player.currentItem ||
@@ -723,10 +729,40 @@
 
 - (void)onFailToComplete:(NSNotification *)notification {
     IndexedPlayerItem *playerItem = (IndexedPlayerItem *)notification.object;
-    NSLog(@"onFailToComplete");
     if (_playing && playerItem == _player.currentItem) {
         [_player pause];
-        [self sendErrorForItem:playerItem];
+
+         NSError *error = notification.userInfo[AVPlayerItemFailedToPlayToEndTimeErrorKey];
+        
+        if (error) {
+            NSLog(@"onFailToComplete: Error Domain: %@", error.domain);
+            NSLog(@"onFailToComplete: Error Code: %d", error.code);
+            NSLog(@"onFailToComplete: User Info: %@", error.userInfo);
+
+            // Retrieve and log error log from AVPlayerItem
+            AVPlayerItemErrorLog *errorLog = playerItem.errorLog;
+            if (errorLog) {
+                for (AVPlayerItemErrorLogEvent *event in errorLog.events) {
+                    NSLog(@"Error Log Event: %@, Status Code: %d, Domain: %@, Comment: %@", event.date, event.errorStatusCode, event.errorDomain, event.errorComment);
+                }
+            } else {
+                NSLog(@"No errors in AVPlayerItem error log.");
+            }
+
+            // Construct error message with basic error details
+            NSString *detailedErrorDescription = [NSString stringWithFormat:@"Domain: %@, Code: %ld, User Info: %@", error.domain, (long)error.code, error.userInfo];
+            
+            FlutterError *flutterError = [FlutterError errorWithCode:@"onFailToComplete"
+                                                            message:detailedErrorDescription
+                                                            details:nil];
+            [self sendError:flutterError playerItem:playerItem];
+        } else {
+            NSLog(@"onFailToComplete: Unknown error");
+            FlutterError *flutterError = [FlutterError errorWithCode:@"onFailToComplete"
+                                                            message:@"Unknown error"
+                                                            details:nil];
+            [self sendError:flutterError playerItem:playerItem];
+        }
     }
 }
 
@@ -861,19 +897,32 @@
                 status = statusNumber.intValue;
             }
             switch (status) {
-                case AVPlayerTimeControlStatusPaused:
+                case AVPlayerTimeControlStatusPaused: {
                     NSLog(@"AVPlayerTimeControlStatusPaused");
+                    NSString *pausedReason = _player.reasonForWaitingToPlay;
+                    NSLog(@"Player is paused due to: %@", pausedReason);
                     break;
-                case AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate:
-                    NSLog(@"AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate");
+                }
+                case AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate: {
+                    NSString *waitingReason = _player.reasonForWaitingToPlay;
+                    NSLog(@"Player is waiting due to: %@", waitingReason);
                     if (_processingState != completed) {
-                        [self enterBuffering:@"timeControlStatus"];
+                        if ([waitingReason isEqualToString:AVPlayerWaitingToMinimizeStallsReason]) {
+                            [self enterBuffering:@"Waiting to minimize stalls"];
+                        } else if ([waitingReason isEqualToString:AVPlayerWaitingWhileEvaluatingBufferingRateReason]) {
+                            [self enterBuffering:@"Waiting while evaluating buffering rate"];
+                        } else if ([waitingReason isEqualToString:AVPlayerWaitingWithNoItemToPlayReason]) {
+                            [self enterBuffering:@"Waiting with no item to play"];
+                        } else {
+                            [self enterBuffering:@"Waiting for an unknown reason"];
+                        }
                         [self updatePosition];
                         [self broadcastPlaybackEvent];
                     } else {
                         NSLog(@"Ignoring wait signal because we reached the end");
                     }
                     break;
+                }
                 case AVPlayerTimeControlStatusPlaying:
                     [self leaveBuffering:@"timeControlStatus"];
                     [self updatePosition];
@@ -1192,18 +1241,101 @@
     return result;
 }
 
+// -(void)refetchStream {
+//     if (!_player.currentItem) {
+//         NSLog(@"Current item is nil. Cannot refetch stream.");
+//         return;
+//     }
+
+//     AVPlayerItem *currentItem = _player.currentItem;
+//     AVPlayerItem *newItem = [currentItem copy];
+//     if (!newItem) {
+//         NSLog(@"Failed to create a copy of the player item.");
+//         return;
+//     }
+
+//     CMTime currentTime = currentItem.currentTime;
+//     if (CMTIME_IS_INVALID(currentTime)) {
+//         NSLog(@"Current time is invalid. Cannot refetch stream.");
+//         return;
+//     }
+
+//     NSLog(@"Refetching Stream. Current Time: %lf", CMTimeGetSeconds(currentTime));
+
+//     // Update the corresponding IndexedAudioSource
+//     [self removeItemObservers:currentItem];
+//     [self addItemObservers:newItem];
+
+//     // Replace the player item in the queue
+//     [_player removeItem:currentItem];
+//     [_player insertItem:newItem afterItem:nil];
+//     [_player advanceToNextItem];
+
+//     [newItem seekToTime:currentTime completionHandler:^(BOOL finished) {
+//         if (finished) {
+//             NSLog(@"Stream refetched and seeked to previous time successfully.");
+//             [self.player play];
+//         } else {
+//             NSLog(@"Failed to seek to previous time after refetching stream.");
+//             FlutterError *flutterError = [FlutterError errorWithCode:@"refetchFailed"
+//                                                         message:@"Failed to refetch stream"
+//                                                         details:nil];
+//             [self sendError:flutterError playerItem:newItem];
+//         }
+//     }];
+// }
+
 -(void)handleStalled {
     if (!_playing) return;
 
-    NSLog(@"Handle stalled. Available: %lf", [self availableDuration]);
+    if (!_stallDetectionStartTime) {
+        _stallDetectionStartTime = [NSDate date];
+        NSLog(@"Stall detected. Starting stall detection timer.");
+    }
+
+    NSTimeInterval timeSinceStallDetected = -[_stallDetectionStartTime timeIntervalSinceNow];
+    NSLog(@"Time since stall detected: %lf seconds", timeSinceStallDetected);
 
     if (_player.currentItem.playbackLikelyToKeepUp || 
-            [self availableDuration] - CMTimeGetSeconds(_player.currentItem.currentTime) > 10.0) {
-        [_player play];
-    } else {
-        [self performSelector:@selector(handleStalled) withObject:nil afterDelay:0.5]; //try again
+        [self availableDuration] - CMTimeGetSeconds(_player.currentItem.currentTime) > 10.0) {
+        NSLog(@"Playback likely to keep up or sufficient buffer available. Resuming playback.");
+        [self.player play];
+        _stallDetectionStartTime = nil;
+    } else if (timeSinceStallDetected > 10) {
+        NSLog(@"Stall duration exceeded 10 seconds. Seeking backwards a bit and resuming playback.");
+        CMTime currentTime = _player.currentItem.currentTime;
+        CMTime seekTime = CMTimeSubtract(currentTime, CMTimeMakeWithSeconds(2, NSEC_PER_SEC)); // Seek back 2 seconds
+
+        if (CMTIME_COMPARE_INLINE(seekTime, < , kCMTimeZero)) {
+            seekTime = kCMTimeZero;
+        }
+
+        if (_player.currentItem.status == AVPlayerItemStatusReadyToPlay) {
+            [_player.currentItem seekToTime:seekTime completionHandler:^(BOOL finished) {
+                if (finished) {
+                    NSLog(@"Seeked backward to refetch the stream.");
+                    [_player play];
+                    _stallDetectionStartTime = nil;
+                } else {
+                    NSLog(@"Failed to seek backward for refetching.");
+                    NSLog(@"Continuing to handle stall. Will check again in 0.5 seconds.");
+                    [self performSelector:@selector(handleStalled) withObject:nil afterDelay:0.5];
+                }
+            }];
+        } else {
+            NSLog(@"Player item is not ready to perform seek operation.");
+            [_player pause];
+        }
+    } 
+    // else if(timeSinceStallDetected > 20){
+    //     [self refetchStream];
+    // } 
+    else {
+        NSLog(@"Continuing to handle stall. Will check again in 0.5 seconds.");
+        [self performSelector:@selector(handleStalled) withObject:nil afterDelay:0.5];
     }
 }
+
 
 - (void)seek:(CMTime)position index:(NSNumber *)newIndex completionHandler:(void (^)(BOOL))completionHandler {
     if (_processingState == none || _processingState == loading) {

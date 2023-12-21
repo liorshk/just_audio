@@ -1,11 +1,16 @@
 import 'dart:async';
 import 'dart:html';
 import 'dart:math';
+import 'dart:ui' as ui;
 
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_web_plugins/flutter_web_plugins.dart';
 import 'package:just_audio_platform_interface/just_audio_platform_interface.dart';
+
+import 'hls.dart';
+import 'package:js/js.dart';
+import 'extra.dart';
 
 /// The web implementation of [JustAudioPlatform].
 class JustAudioPlugin extends JustAudioPlatform {
@@ -106,6 +111,7 @@ class Html5AudioPlayer extends JustAudioPlayer {
   LoopModeMessage _loopMode = LoopModeMessage.off;
   bool _shuffleModeEnabled = false;
   final Map<String, AudioSourcePlayer> _audioSourcePlayers = {};
+  Hls? _hls;
 
   /// Creates an [Html5AudioPlayer] with the given [id].
   Html5AudioPlayer({required String id}) : super(id: id) {
@@ -139,6 +145,73 @@ class Html5AudioPlayer extends JustAudioPlayer {
     _audioElement.addEventListener('progress', (event) {
       broadcastPlaybackEvent();
     });
+  }
+
+  Future<void> initializeHlsHandling(uri) async {
+    if (await shouldUseHlsLibrary(uri)) {
+      try {
+        _hls = Hls(
+          HlsConfig(
+            xhrSetup: allowInterop(
+              (HttpRequest xhr, String _) {
+                return;
+                // if (headers.isEmpty) {
+                //   return;
+                // }
+
+                // if (headers.containsKey('useCookies')) {
+                //   xhr.withCredentials = true;
+                // }
+                // headers.forEach((String key, String value) {
+                //   if (key != 'useCookies') {
+                //     xhr.setRequestHeader(key, value);
+                //   }
+                // });
+              },
+            ),
+          ),
+        );
+        _hls!.attachMedia(_audioElement);
+        _hls!.on('hlsMediaAttached', allowInterop((dynamic _, dynamic __) {
+          _hls!.loadSource(uri.toString());
+        }));
+        _hls!.on('hlsError', allowInterop((dynamic _, dynamic data) {
+          final ErrorData _data = ErrorData(data);
+          if (_data.fatal) {
+            _eventController.addError(PlatformException(
+              code: kErrorValueToErrorName[2]!,
+              message: _data.type,
+              details: _data.details,
+            ));
+          }
+        }));
+        _audioElement.onCanPlay.listen((dynamic _) {
+          _durationCompleter?.complete();
+        });
+      } catch (e) {
+        throw NoScriptTagException();
+      }
+    } else {
+      _audioElement.src = uri.toString();
+      _audioElement.load();
+    }
+  }
+
+  // HLS support check methods (similar to VideoPlayer class)
+  bool canPlayHlsNatively() {
+    bool canPlayHls = false;
+    try {
+      final String canPlayType =
+          _audioElement.canPlayType('application/vnd.apple.mpegurl');
+      canPlayHls = canPlayType != '';
+    } catch (e) {}
+    return canPlayHls;
+  }
+
+  Future<bool> shouldUseHlsLibrary(uri) async {
+    return isSupported() &&
+        (uri.toString().contains('m3u8')) &&
+        !canPlayHlsNatively();
   }
 
   /// The current playback order, depending on whether shuffle mode is enabled.
@@ -239,10 +312,15 @@ class Html5AudioPlayer extends JustAudioPlayer {
     final src = uri.toString();
     if (src != _audioElement.src) {
       _durationCompleter = Completer<dynamic>();
+      _audioElement.id = 'audioPlayer-$id';
       _audioElement.src = src;
       _audioElement.playbackRate = _speed;
       _audioElement.preload = 'auto';
-      _audioElement.load();
+      ui.platformViewRegistry.registerViewFactory(
+          'audioPlayer-$id', (int viewId) => _audioElement);
+
+      await initializeHlsHandling(uri);
+
       if (initialPosition != null) {
         _audioElement.currentTime = initialPosition.inMilliseconds / 1000.0;
       }
@@ -467,6 +545,7 @@ class Html5AudioPlayer extends JustAudioPlayer {
     _currentAudioSourcePlayer?.pause();
     _audioElement.removeAttribute('src');
     _audioElement.load();
+    _hls?.stopLoad();
     transition(ProcessingStateMessage.idle);
     return await super.release();
   }

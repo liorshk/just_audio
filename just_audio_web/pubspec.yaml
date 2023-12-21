@@ -12,6 +12,7 @@ flutter:
 
 dependencies:
   just_audio_platform_interface: ^4.2.2
+  js: ^0.6.7
   # just_audio_platform_interface:
   #   path: ../just_audio_platform_interface
   flutter:
