@@ -178,11 +178,11 @@ class Html5AudioPlayer extends JustAudioPlayer {
         _hls!.on('hlsError', allowInterop((dynamic _, dynamic data) {
           final ErrorData _data = ErrorData(data);
           if (_data.fatal) {
-            _eventController.addError(PlatformException(
+            throw PlatformException(
               code: kErrorValueToErrorName[2]!,
               message: _data.type,
               details: _data.details,
-            ));
+            );
           }
         }));
         _audioElement.onCanPlay.listen((dynamic _) {
@@ -197,7 +197,7 @@ class Html5AudioPlayer extends JustAudioPlayer {
     }
   }
 
-  // HLS support check methods (similar to VideoPlayer class)
+  // HLS support check methods (similar to AudioPlayer class)
   bool canPlayHlsNatively() {
     bool canPlayHls = false;
     try {
