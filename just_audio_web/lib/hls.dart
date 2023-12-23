@@ -33,7 +33,24 @@ class HlsConfig {
   @JS()
   external Function get xhrSetup;
 
-  external factory HlsConfig({Function xhrSetup});
+  @JS()
+  external bool debug;
+
+  @JS()
+  external bool enableWorker;
+
+  @JS()
+  external bool progressive;
+
+  @JS()
+  external bool lowLatencyMode;
+
+  external factory HlsConfig(
+      {Function xhrSetup,
+      bool debug,
+      bool enableWorker,
+      bool progressive,
+      bool lowLatencyMode});
 }
 
 class ErrorData {

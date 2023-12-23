@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:html';
 import 'dart:math';
-import 'dart:ui' as ui;
+import 'dart:ui_web' as ui;
 
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -152,6 +152,9 @@ class Html5AudioPlayer extends JustAudioPlayer {
       try {
         _hls = Hls(
           HlsConfig(
+            // debug: true,
+            enableWorker: true,
+            progressive: true,
             xhrSetup: allowInterop(
               (HttpRequest xhr, String _) {
                 return;
@@ -177,6 +180,7 @@ class Html5AudioPlayer extends JustAudioPlayer {
         }));
         _hls!.on('hlsError', allowInterop((dynamic _, dynamic data) {
           final ErrorData _data = ErrorData(data);
+          print('HLS error: ${_data.type} ${_data.details} ${_data.fatal}');
           if (_data.fatal) {
             throw PlatformException(
               code: kErrorValueToErrorName[2]!,
@@ -186,32 +190,22 @@ class Html5AudioPlayer extends JustAudioPlayer {
           }
         }));
         _audioElement.onCanPlay.listen((dynamic _) {
+          print('HLS can play');
           _durationCompleter?.complete();
         });
       } catch (e) {
+        print(e);
         throw NoScriptTagException();
       }
     } else {
+      print('Not playing HLS');
       _audioElement.src = uri.toString();
       _audioElement.load();
     }
   }
 
-  // HLS support check methods (similar to AudioPlayer class)
-  bool canPlayHlsNatively() {
-    bool canPlayHls = false;
-    try {
-      final String canPlayType =
-          _audioElement.canPlayType('application/vnd.apple.mpegurl');
-      canPlayHls = canPlayType != '';
-    } catch (e) {}
-    return canPlayHls;
-  }
-
   Future<bool> shouldUseHlsLibrary(uri) async {
-    return isSupported() &&
-        (uri.toString().contains('m3u8')) &&
-        !canPlayHlsNatively();
+    return isSupported() && (uri.toString().contains('m3u8'));
   }
 
   /// The current playback order, depending on whether shuffle mode is enabled.
