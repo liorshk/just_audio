@@ -150,11 +150,17 @@ class Html5AudioPlayer extends JustAudioPlayer {
   Future<void> initializeHlsHandling(uri) async {
     if (await shouldUseHlsLibrary(uri)) {
       try {
+        if(_hls != null) {
+          _hls?.destroy();
+        }
+        
         _hls = Hls(
           HlsConfig(
             // debug: true,
             enableWorker: true,
-            progressive: true,
+            progressive: false,
+            appendErrorMaxRetry: 5,
+            lowLatencyMode: true,
             xhrSetup: allowInterop(
               (HttpRequest xhr, String _) {
                 return;
@@ -180,8 +186,10 @@ class Html5AudioPlayer extends JustAudioPlayer {
         }));
         _hls!.on('hlsError', allowInterop((dynamic _, dynamic data) {
           final ErrorData _data = ErrorData(data);
+          // TODO: better communicate this error to the just_audio client
           print('HLS error: ${_data.type} ${_data.details} ${_data.fatal}');
           if (_data.fatal) {
+            _hls!.recoverMediaError();
             throw PlatformException(
               code: kErrorValueToErrorName[2]!,
               message: _data.type,
@@ -194,8 +202,9 @@ class Html5AudioPlayer extends JustAudioPlayer {
           _durationCompleter?.complete();
         });
       } catch (e) {
+        // _hls!.destroy();
         print(e);
-        throw NoScriptTagException();
+        // throw NoScriptTagException();
       }
     } else {
       print('Not playing HLS');

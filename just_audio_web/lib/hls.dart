@@ -16,6 +16,12 @@ class Hls {
   external void stopLoad();
 
   @JS()
+  external void destroy();
+
+  @JS()
+  external void recoverMediaError();
+
+  @JS()
   external void loadSource(String videoSrc);
 
   @JS()
@@ -40,6 +46,9 @@ class HlsConfig {
   external bool enableWorker;
 
   @JS()
+  external int appendErrorMaxRetry;
+
+  @JS()
   external bool progressive;
 
   @JS()
@@ -50,6 +59,7 @@ class HlsConfig {
       bool debug,
       bool enableWorker,
       bool progressive,
+      int appendErrorMaxRetry,
       bool lowLatencyMode});
 }
 
