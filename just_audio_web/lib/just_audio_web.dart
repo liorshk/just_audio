@@ -82,17 +82,19 @@ abstract class JustAudioPlayer extends AudioPlayerPlatform {
   /// Broadcasts a playback event from the platform side to the plugin side.
   void broadcastPlaybackEvent() {
     var updateTime = DateTime.now();
-    _eventController.add(PlaybackEventMessage(
-      processingState: _processingState,
-      updatePosition: getCurrentPosition(),
-      updateTime: updateTime,
-      bufferedPosition: getBufferedPosition(),
-      // TODO: Icy Metadata
-      icyMetadata: null,
-      duration: getDuration(),
-      currentIndex: _index,
-      androidAudioSessionId: null,
-    ));
+    if (!_eventController.isClosed) {
+      _eventController.add(PlaybackEventMessage(
+        processingState: _processingState,
+        updatePosition: getCurrentPosition(),
+        updateTime: updateTime,
+        bufferedPosition: getBufferedPosition(),
+        // TODO: Icy Metadata
+        icyMetadata: null,
+        duration: getDuration(),
+        currentIndex: _index,
+        androidAudioSessionId: null,
+      ));
+    }
   }
 
   /// Transitions to [processingState] and broadcasts a playback event.
@@ -112,14 +114,17 @@ class Html5AudioPlayer extends JustAudioPlayer {
   bool _shuffleModeEnabled = false;
   final Map<String, AudioSourcePlayer> _audioSourcePlayers = {};
   Hls? _hls;
+  dynamic _currentUri;
 
   /// Creates an [Html5AudioPlayer] with the given [id].
   Html5AudioPlayer({required String id}) : super(id: id) {
+    debugPrint('HLS Html5AudioPlayer constructor');
     _audioElement.addEventListener('durationchange', (event) {
       _durationCompleter?.complete();
       broadcastPlaybackEvent();
     });
     _audioElement.addEventListener('error', (event) {
+      debugPrint('HLS ERROR: $event');
       _durationCompleter?.completeError(_audioElement.error!);
     });
     _audioElement.addEventListener('ended', (event) async {
@@ -136,6 +141,7 @@ class Html5AudioPlayer extends JustAudioPlayer {
       transition(ProcessingStateMessage.buffering);
     });
     _audioElement.addEventListener('stalled', (event) {
+      debugPrint('HLS STALLED');
       transition(ProcessingStateMessage.buffering);
     });
     _audioElement.addEventListener('canplaythrough', (event) {
@@ -145,69 +151,108 @@ class Html5AudioPlayer extends JustAudioPlayer {
     _audioElement.addEventListener('progress', (event) {
       broadcastPlaybackEvent();
     });
+    _audioElement.onCanPlay.listen((dynamic _) {
+      print('HLS can play');
+      _durationCompleter?.complete();
+    });
+
+  }
+
+  Future<void> _initiateHLS() async {
+    debugPrint('HLS _initiateHLS');
+    _hls = Hls(
+      HlsConfig(
+        debug: false,
+        enableWorker: true,
+        progressive: false,
+        appendErrorMaxRetry: 5,
+        lowLatencyMode: true,
+        xhrSetup: allowInterop(
+              (HttpRequest xhr, String _) {
+                xhr.withCredentials = false;
+            //return;
+            // if (headers.isEmpty) {
+            //   return;
+            // }
+
+            // if (headers.containsKey('useCookies')) {
+            //   xhr.withCredentials = true;
+            // }
+            // headers.forEach((String key, String value) {
+            //   if (key != 'useCookies') {
+            //     xhr.setRequestHeader(key, value);
+            //   }
+            // });
+          },
+        ),
+      ),
+    );
+
+    _hls!.on('hlsAudioTrackLoading', allowInterop((dynamic _, dynamic __) {
+      debugPrint('HLS on hlsAudioTrackLoading');
+    }));
+
+    _hls!.on('hlsAudioTrackLoaded', allowInterop((dynamic _, dynamic __) {
+      debugPrint('HLS on hlsAudioTrackLoaded');
+    }));
+
+    _hls!.on('hlsAudioTrackLoaded', allowInterop((dynamic _, dynamic __) {
+      debugPrint('HLS on hlsAudioTrackLoaded');
+    }));
+
+    _hls!.on('hlsMediaAttached', allowInterop((dynamic _, dynamic __) {
+      debugPrint('HLS on hlsMediaAttached: $_currentUri');
+      // if (_currentUri != null) {
+      //   _hls!.loadSource(_currentUri.toString());
+      //   _currentUri = null;
+      // }
+    }));
+    _hls!.on('hlsError', allowInterop((dynamic _, dynamic data) {
+      debugPrint('HLS Html5AudioPlayer on hlsError');
+      try {
+        final ErrorData _data = ErrorData(data);
+        debugPrint('HLS error: ${_data.type} ${_data.details} ${_data.fatal}');
+        if (_data.fatal) {
+          _hls!.recoverMediaError();
+          throw PlatformException(
+            code: kErrorValueToErrorName[2]!,
+            message: _data.type,
+            details: _data.details,
+          );
+        }
+      } catch(e) {
+        debugPrint('HLS error not parsed: $e');
+      }
+      // TODO: better communicate this error to the just_audio client
+    }));
   }
 
   Future<void> initializeHlsHandling(uri) async {
+    debugPrint('HLS Html5AudioPlayer initializeHlsHandling');
     if (await shouldUseHlsLibrary(uri)) {
       try {
-        if(_hls != null) {
-          _hls?.destroy();
-        }
-        
-        _hls = Hls(
-          HlsConfig(
-            // debug: true,
-            enableWorker: true,
-            progressive: false,
-            appendErrorMaxRetry: 5,
-            lowLatencyMode: true,
-            xhrSetup: allowInterop(
-              (HttpRequest xhr, String _) {
-                return;
-                // if (headers.isEmpty) {
-                //   return;
-                // }
 
-                // if (headers.containsKey('useCookies')) {
-                //   xhr.withCredentials = true;
-                // }
-                // headers.forEach((String key, String value) {
-                //   if (key != 'useCookies') {
-                //     xhr.setRequestHeader(key, value);
-                //   }
-                // });
-              },
-            ),
-          ),
-        );
+        if (_hls == null) {
+          await _initiateHLS();
+        }
+
+        try {
+          _hls!.detachMedia();
+        } catch(e) {
+          debugPrint('$e');
+        }
+
+        _currentUri = uri;
+        _hls!.loadSource(uri.toString());
         _hls!.attachMedia(_audioElement);
-        _hls!.on('hlsMediaAttached', allowInterop((dynamic _, dynamic __) {
-          _hls!.loadSource(uri.toString());
-        }));
-        _hls!.on('hlsError', allowInterop((dynamic _, dynamic data) {
-          final ErrorData _data = ErrorData(data);
-          // TODO: better communicate this error to the just_audio client
-          print('HLS error: ${_data.type} ${_data.details} ${_data.fatal}');
-          if (_data.fatal) {
-            _hls!.recoverMediaError();
-            throw PlatformException(
-              code: kErrorValueToErrorName[2]!,
-              message: _data.type,
-              details: _data.details,
-            );
-          }
-        }));
-        _audioElement.onCanPlay.listen((dynamic _) {
-          print('HLS can play');
-          _durationCompleter?.complete();
-        });
+
       } catch (e) {
         // _hls!.destroy();
-        print(e);
+        debugPrint('$e');
         // throw NoScriptTagException();
       }
     } else {
-      print('Not playing HLS');
+      debugPrint('Not playing HLS');
       _audioElement.src = uri.toString();
       _audioElement.load();
     }
@@ -219,6 +264,7 @@ class Html5AudioPlayer extends JustAudioPlayer {
 
   /// The current playback order, depending on whether shuffle mode is enabled.
   List<int> get order {
+    debugPrint('HLS Html5AudioPlayer order');
     final sequence = _audioSourcePlayer!.sequence;
     return _shuffleModeEnabled
         ? _audioSourcePlayer!.shuffleIndices
@@ -227,6 +273,7 @@ class Html5AudioPlayer extends JustAudioPlayer {
 
   /// gets the inverted order for the given order.
   List<int> getInv(List<int> order) {
+    debugPrint('HLS Html5AudioPlayer getInv');
     final orderInv = List<int>.filled(order.length, 0);
     for (var i = 0; i < order.length; i++) {
       orderInv[order[i]] = i;
@@ -236,6 +283,7 @@ class Html5AudioPlayer extends JustAudioPlayer {
 
   /// Called when playback reaches the end of an item.
   Future<void> onEnded() async {
+    debugPrint('HLS Html5AudioPlayer onEnded');
     if (_loopMode == LoopModeMessage.one) {
       await _seek(0, null);
       _play();
@@ -292,6 +340,7 @@ class Html5AudioPlayer extends JustAudioPlayer {
 
   @override
   Future<LoadResponse> load(LoadRequest request) async {
+    debugPrint('HLS Html5AudioPlayer load');
     _currentAudioSourcePlayer?.pause();
     _audioSourcePlayer = getAudioSource(request.audioSourceMessage);
     _index = request.initialIndex ?? 0;
@@ -311,9 +360,12 @@ class Html5AudioPlayer extends JustAudioPlayer {
   /// known.
   Future<Duration?> loadUri(
       final Uri uri, final Duration? initialPosition) async {
+    debugPrint('HLS Html5AudioPlayer loadUri');
     transition(ProcessingStateMessage.loading);
     final src = uri.toString();
     if (src != _audioElement.src) {
+      debugPrint('HLS loadUri finally 1');
+      _hls?.detachMedia();
       _durationCompleter = Completer<dynamic>();
       _audioElement.id = 'audioPlayer-$id';
       _audioElement.src = src;
@@ -321,23 +373,32 @@ class Html5AudioPlayer extends JustAudioPlayer {
       _audioElement.preload = 'auto';
       ui.platformViewRegistry.registerViewFactory(
           'audioPlayer-$id', (int viewId) => _audioElement);
-
+      debugPrint('HLS loadUri finally 2');
       await initializeHlsHandling(uri);
-
+      debugPrint('HLS loadUri finally 3');
       if (initialPosition != null) {
+        debugPrint('HLS loadUri finally 3.5');
         _audioElement.currentTime = initialPosition.inMilliseconds / 1000.0;
       }
       try {
         await _durationCompleter!.future;
+        debugPrint('HLS loadUri finally 4');
       } on MediaError catch (e) {
+        debugPrint('HLS loadUri error MediaError: $e');
         throw PlatformException(
             code: "${e.code}", message: "Failed to load URL");
+      } catch(e) {
+        debugPrint('HLS loadUri error unknown: $e');
       } finally {
+        debugPrint('HLS loadUri finally');
         _durationCompleter = null;
       }
     }
+    debugPrint('HLS loadUri finally 5');
     transition(ProcessingStateMessage.ready);
+    debugPrint('HLS loadUri finally 6');
     final seconds = _audioElement.duration;
+    debugPrint('HLS loadUri finally 7');
     return seconds.isFinite
         ? Duration(milliseconds: (seconds * 1000).toInt())
         : null;
@@ -345,6 +406,7 @@ class Html5AudioPlayer extends JustAudioPlayer {
 
   @override
   Future<PlayResponse> play(PlayRequest request) async {
+    debugPrint('HLS Html5AudioPlayer play');
     if (_playing) return PlayResponse();
     _playing = true;
     await _play();
@@ -352,11 +414,13 @@ class Html5AudioPlayer extends JustAudioPlayer {
   }
 
   Future<void> _play() async {
+    debugPrint('HLS Html5AudioPlayer _play');
     await _currentAudioSourcePlayer?.play();
   }
 
   @override
   Future<PauseResponse> pause(PauseRequest request) async {
+    debugPrint('HLS Html5AudioPlayer pause');debugPrint('HLS Html5AudioPlayer pause _playing: $_playing _currentAudioSourcePlayer: $_currentAudioSourcePlayer');
     if (!_playing) return PauseResponse();
     _playing = false;
     _currentAudioSourcePlayer?.pause();
@@ -365,18 +429,21 @@ class Html5AudioPlayer extends JustAudioPlayer {
 
   @override
   Future<SetVolumeResponse> setVolume(SetVolumeRequest request) async {
+    debugPrint('HLS Html5AudioPlayer setVolume');
     _audioElement.volume = request.volume;
     return SetVolumeResponse();
   }
 
   @override
   Future<SetSpeedResponse> setSpeed(SetSpeedRequest request) async {
+    debugPrint('HLS Html5AudioPlayer setSpeed');
     _audioElement.playbackRate = _speed = request.speed;
     return SetSpeedResponse();
   }
 
   @override
   Future<SetLoopModeResponse> setLoopMode(SetLoopModeRequest request) async {
+    debugPrint('HLS Html5AudioPlayer setLoopMode');
     _loopMode = request.loopMode;
     return SetLoopModeResponse();
   }
@@ -384,6 +451,7 @@ class Html5AudioPlayer extends JustAudioPlayer {
   @override
   Future<SetShuffleModeResponse> setShuffleMode(
       SetShuffleModeRequest request) async {
+    debugPrint('HLS Html5AudioPlayer setShuffleMode');
     _shuffleModeEnabled = request.shuffleMode == ShuffleModeMessage.all;
     return SetShuffleModeResponse();
   }
@@ -391,6 +459,7 @@ class Html5AudioPlayer extends JustAudioPlayer {
   @override
   Future<SetShuffleOrderResponse> setShuffleOrder(
       SetShuffleOrderRequest request) async {
+    debugPrint('HLS Html5AudioPlayer setShuffleOrder');
     void internalSetShuffleOrder(AudioSourceMessage sourceMessage) {
       final audioSourcePlayer = _audioSourcePlayers[sourceMessage.id];
       if (audioSourcePlayer == null) return;
@@ -411,28 +480,36 @@ class Html5AudioPlayer extends JustAudioPlayer {
 
   @override
   Future<SeekResponse> seek(SeekRequest request) async {
+    debugPrint('HLS Html5AudioPlayer seek');
     await _seek(request.position?.inMilliseconds ?? 0, request.index);
     return SeekResponse();
   }
 
   Future<void> _seek(int position, int? newIndex) async {
+    debugPrint('HLS Html5AudioPlayer _seek');
     var index = newIndex ?? _index;
+    if (_currentAudioSourcePlayer ==  null) {
+      debugPrint('HLS Html5AudioPlayer _seek _currentAudioSourcePlayer == null');
+      return;
+    }
     if (index != _index) {
-      _currentAudioSourcePlayer!.pause();
+      await _currentAudioSourcePlayer?.pause();
       _index = index;
-      await _currentAudioSourcePlayer!.load(position);
+      await _currentAudioSourcePlayer?.load(position);
       if (_playing) {
-        _currentAudioSourcePlayer!.play();
+        await _currentAudioSourcePlayer?.play();
       }
     } else {
-      await _currentAudioSourcePlayer!.seek(position);
+      await _currentAudioSourcePlayer?.seek(position);
     }
   }
 
   ConcatenatingAudioSourcePlayer? _concatenating(String playerId) =>
       _audioSourcePlayers[playerId] as ConcatenatingAudioSourcePlayer?;
 
-  @override
+
+  // todo revert?
+  /*@override
   Future<ConcatenatingInsertAllResponse> concatenatingInsertAll(
       ConcatenatingInsertAllRequest request) async {
     final wasNotEmpty = _audioSourcePlayer?.sequence.isNotEmpty ?? false;
@@ -445,11 +522,27 @@ class Html5AudioPlayer extends JustAudioPlayer {
     await _currentAudioSourcePlayer!.load();
     broadcastPlaybackEvent();
     return ConcatenatingInsertAllResponse();
+  }*/
+
+
+  @override
+  Future<ConcatenatingInsertAllResponse> concatenatingInsertAll(
+      ConcatenatingInsertAllRequest request) async {
+    final wasNotEmpty = _audioSourcePlayer?.sequence.isNotEmpty ?? false;
+    _concatenating(request.id)?.setShuffleOrder(request.shuffleOrder);
+    _concatenating(request.id)?.insertAll(request.index, getAudioSources(request.children));
+    if (_index != null && wasNotEmpty && request.index <= _index!) {
+      _index = _index! + request.children.length;
+    }
+    await _currentAudioSourcePlayer?.load();
+    broadcastPlaybackEvent();
+    return ConcatenatingInsertAllResponse();
   }
 
   @override
   Future<ConcatenatingRemoveRangeResponse> concatenatingRemoveRange(
       ConcatenatingRemoveRangeRequest request) async {
+    debugPrint('HLS Html5AudioPlayer concatenatingRemoveRange');
     if (_index != null &&
         _index! >= request.startIndex &&
         _index! < request.endIndex &&
@@ -488,6 +581,7 @@ class Html5AudioPlayer extends JustAudioPlayer {
   @override
   Future<ConcatenatingMoveResponse> concatenatingMove(
       ConcatenatingMoveRequest request) async {
+    debugPrint('HLS Html5AudioPlayer concatenatingMove');
     _concatenating(request.id)!.setShuffleOrder(request.shuffleOrder);
     _concatenating(request.id)!.move(request.currentIndex, request.newIndex);
     if (_index != null) {
@@ -508,6 +602,7 @@ class Html5AudioPlayer extends JustAudioPlayer {
   @override
   Future<SetAndroidAudioAttributesResponse> setAndroidAudioAttributes(
       SetAndroidAudioAttributesRequest request) async {
+    debugPrint('HLS Html5AudioPlayer setAndroidAudioAttributes');
     return SetAndroidAudioAttributesResponse();
   }
 
@@ -515,6 +610,7 @@ class Html5AudioPlayer extends JustAudioPlayer {
   Future<SetAutomaticallyWaitsToMinimizeStallingResponse>
       setAutomaticallyWaitsToMinimizeStalling(
           SetAutomaticallyWaitsToMinimizeStallingRequest request) async {
+    debugPrint('HLS Html5AudioPlayer setAutomaticallyWaitsToMinimizeStalling');
     return SetAutomaticallyWaitsToMinimizeStallingResponse();
   }
 
@@ -523,28 +619,50 @@ class Html5AudioPlayer extends JustAudioPlayer {
       setCanUseNetworkResourcesForLiveStreamingWhilePaused(
           SetCanUseNetworkResourcesForLiveStreamingWhilePausedRequest
               request) async {
+    debugPrint('HLS Html5AudioPlayer setCanUseNetworkResourcesForLiveStreamingWhilePaused');
     return SetCanUseNetworkResourcesForLiveStreamingWhilePausedResponse();
   }
 
   @override
   Future<SetPreferredPeakBitRateResponse> setPreferredPeakBitRate(
       SetPreferredPeakBitRateRequest request) async {
+    debugPrint('HLS Html5AudioPlayer setPreferredPeakBitRate');
     return SetPreferredPeakBitRateResponse();
   }
 
   @override
-  Duration getCurrentPosition() =>
-      _currentAudioSourcePlayer?.position ?? Duration.zero;
+  Duration getCurrentPosition() {
+    debugPrint('HLS Html5AudioPlayer getCurrentPosition _currentAudioSourcePlayer: ${_currentAudioSourcePlayer}');
+    return _currentAudioSourcePlayer?.position ?? Duration.zero;
+  }
+
 
   @override
-  Duration getBufferedPosition() =>
-      _currentAudioSourcePlayer?.bufferedPosition ?? Duration.zero;
+  Duration getBufferedPosition() {
+    debugPrint('HLS Html5AudioPlayer getBufferedPosition _currentAudioSourcePlayer: ${_currentAudioSourcePlayer}');
+    return _currentAudioSourcePlayer?.bufferedPosition ?? Duration.zero;
+  }
+
 
   @override
-  Duration? getDuration() => _currentAudioSourcePlayer?.duration;
+  Duration? getDuration() {
+    debugPrint('HLS Html5AudioPlayer getDuration _currentAudioSourcePlayer: $_currentAudioSourcePlayer');
+    final current = _currentAudioSourcePlayer?.duration;
+    debugPrint('HLS Html5AudioPlayer getDuration error?: ${_currentAudioSourcePlayer?._audioElement.error}');
+    debugPrint('HLS Html5AudioPlayer getDuration src: ${_currentAudioSourcePlayer?._audioElement.currentSrc}');
+    debugPrint('HLS Html5AudioPlayer getDuration id: ${_currentAudioSourcePlayer?.id}');
+    debugPrint('HLS Html5AudioPlayer getDuration _audioSourcePlayers.length: ${_audioSourcePlayers.length}');
+    debugPrint('HLS Html5AudioPlayer getDuration _index: ${_index}');
+    debugPrint('HLS Html5AudioPlayer getDuration _audioElement error?: ${_audioElement.error}');
+    debugPrint('HLS Html5AudioPlayer getDuration _audioElement current src: ${_audioElement.currentSrc}');
+    debugPrint('HLS Html5AudioPlayer getDuration current duration: $current');
+
+    return current;
+  }
 
   @override
   Future<void> release() async {
+    debugPrint('HLS Html5AudioPlayer release');
     _currentAudioSourcePlayer?.pause();
     _audioElement.removeAttribute('src');
     _audioElement.load();
@@ -554,15 +672,19 @@ class Html5AudioPlayer extends JustAudioPlayer {
   }
 
   /// Converts a list of audio source messages to players.
-  List<AudioSourcePlayer> getAudioSources(List<AudioSourceMessage> messages) =>
-      messages.map((message) => getAudioSource(message)).toList();
+  List<AudioSourcePlayer> getAudioSources(List<AudioSourceMessage> messages) {
+    debugPrint('HLS Html5AudioPlayer getAudioSourceS');
+    return messages.map((message) => getAudioSource(message)).toList();
+  }
 
   /// Converts an audio source message to a player, using the cache if it is
   /// already cached.
   AudioSourcePlayer getAudioSource(AudioSourceMessage audioSourceMessage) {
+    debugPrint('HLS Html5AudioPlayer getAudioSource');
     final id = audioSourceMessage.id;
     var audioSourcePlayer = _audioSourcePlayers[id];
     if (audioSourcePlayer == null) {
+      debugPrint('HLS Html5AudioPlayer getAudioSource == null');
       audioSourcePlayer = decodeAudioSource(audioSourceMessage);
       _audioSourcePlayers[id] = audioSourcePlayer;
     }
@@ -572,6 +694,7 @@ class Html5AudioPlayer extends JustAudioPlayer {
   /// Converts an audio source message to a player.
   AudioSourcePlayer decodeAudioSource(AudioSourceMessage audioSourceMessage) {
     if (audioSourceMessage is ProgressiveAudioSourceMessage) {
+      debugPrint('HLS Html5AudioPlayer decodeAudioSource audioSourceMessage is ${audioSourceMessage.runtimeType}');
       return ProgressiveAudioSourcePlayer(this, audioSourceMessage.id,
           Uri.parse(audioSourceMessage.uri), audioSourceMessage.headers);
     } else if (audioSourceMessage is DashAudioSourceMessage) {

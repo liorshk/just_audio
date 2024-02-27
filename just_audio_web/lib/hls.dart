@@ -28,6 +28,9 @@ class Hls {
   external void attachMedia(AudioElement video);
 
   @JS()
+  external void detachMedia();
+
+  @JS()
   external void on(String event, Function callback);
 
   external HlsConfig config;
