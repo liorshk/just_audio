@@ -28,6 +28,9 @@ class Hls {
   external void attachMedia(AudioElement video);
 
   @JS()
+  external void detachMedia();
+
+  @JS()
   external void on(String event, Function callback);
 
   external HlsConfig config;
@@ -65,12 +68,10 @@ class HlsConfig {
 
 class ErrorData {
   late final String type;
-  late final String details;
   late final bool fatal;
 
   ErrorData(dynamic errorData) {
     type = errorData.type as String;
-    details = errorData.details as String;
     fatal = errorData.fatal as bool;
   }
 }
