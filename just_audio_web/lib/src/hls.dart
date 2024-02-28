@@ -68,12 +68,10 @@ class HlsConfig {
 
 class ErrorData {
   late final String type;
-  late final String details;
   late final bool fatal;
 
   ErrorData(dynamic errorData) {
     type = errorData.type as String;
-    details = errorData.details as String;
     fatal = errorData.fatal as bool;
   }
 }
