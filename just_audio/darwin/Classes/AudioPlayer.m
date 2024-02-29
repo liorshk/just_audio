@@ -344,10 +344,12 @@
 - (int)getCurrentPosition {
     // XXX: During load, the second case will be selected returning 0.
     // TODO: Provide a similar case as _seekPos for _initialPos.
-    if (CMTIME_IS_VALID(_seekPos)) {
+    if (CMTIME_IS_VALID(_seekPos) && (int)CMTimeGetSeconds(_seekPos) > 0) {
+        // NSLog(@"getCurrentPosition: %d", (int)(1000 * CMTimeGetSeconds(_seekPos)));
         return (int)(1000 * CMTimeGetSeconds(_seekPos));
     } else if (_indexedAudioSources && _indexedAudioSources.count > 0) {
         int ms = (int)(1000 * CMTimeGetSeconds(_indexedAudioSources[_index].position));
+        // NSLog(@"getCurrentPosition (_indexedAudioSources): %d", ms);
         if (ms < 0) ms = 0;
         return ms;
     } else {
@@ -899,8 +901,7 @@
             switch (status) {
                 case AVPlayerTimeControlStatusPaused: {
                     NSLog(@"AVPlayerTimeControlStatusPaused");
-                    NSString *pausedReason = _player.reasonForWaitingToPlay;
-                    NSLog(@"Player is paused due to: %@", pausedReason);
+                    [self broadcastPlaybackEvent];
                     break;
                 }
                 case AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate: {

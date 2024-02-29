@@ -311,6 +311,7 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
 
     @Override
     public void onPlaybackStateChanged(int playbackState) {
+        broadcastImmediatePlaybackEvent();
         switch (playbackState) {
         case Player.STATE_READY:
             if (player.getPlayWhenReady())
