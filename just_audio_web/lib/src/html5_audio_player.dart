@@ -22,6 +22,7 @@ class Html5AudioPlayer extends JustAudioPlayer {
   AudioSourcePlayer? _audioSourcePlayer;
   LoopModeMessage _loopMode = LoopModeMessage.off;
   bool _shuffleModeEnabled = false;
+  bool recoverAttempt = false;
   final Map<String, AudioSourcePlayer> _audioSourcePlayers = {};
   Hls? _hls;
   String? _currentUrl;
@@ -34,14 +35,7 @@ class Html5AudioPlayer extends JustAudioPlayer {
       broadcastPlaybackEvent();
     });
     audioElement.addEventListener('error', (Event event) {
-      logHLS('audioElement event ERROR: $event');
-      logHLS('audioElement event ERROR: ${event.runtimeType}');
-      logHLS('audioElement event ERROR type: ${event.type}');
-      try {
-        logHLS('audioElement event ERROR: ${event.jsify()}');
-      } catch (e) {
-        logHLS('audioElement event ERROR parse filed');
-      }
+      logHLS('audioElement event ERROR');
       _durationCompleter?.completeError(audioElement.error!);
     });
     audioElement.addEventListener('ended', (event) async {
@@ -230,13 +224,21 @@ class Html5AudioPlayer extends JustAudioPlayer {
           logHLS('Html5AudioPlayer on hlsError');
           try {
             final ErrorData errorData = ErrorData(data);
-            logHLS('error: ${errorData.type} ${errorData.fatal}');
+            logHLS(
+                'error: ${errorData.type} ${errorData.fatal} ${errorData.details}');
             if (errorData.fatal) {
-              _hls!.recoverMediaError();
+              if (!recoverAttempt) {
+                _hls!.recoverMediaError();
+                recoverAttempt = true;
+              } else {
+                _hls!.swapAudioCodec();
+                _hls!.recoverMediaError();
+                recoverAttempt = false; // reset after second recovery attempt
+              }
               throw PlatformException(
                 code: kErrorValueToErrorName[2]!,
                 message: errorData.type,
-                details: '_data.details',
+                details: '${errorData.details}',
               );
             }
           } catch (e) {

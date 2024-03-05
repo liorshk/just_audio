@@ -22,6 +22,9 @@ class Hls {
   external void recoverMediaError();
 
   @JS()
+  external void swapAudioCodec();
+
+  @JS()
   external void loadSource(String videoSrc);
 
   @JS()
@@ -67,10 +70,12 @@ class HlsConfig {
 }
 
 class ErrorData {
+  late final String details;
   late final String type;
   late final bool fatal;
 
   ErrorData(dynamic errorData) {
+    details = errorData.details as String;
     type = errorData.type as String;
     fatal = errorData.fatal as bool;
   }
