@@ -22,7 +22,7 @@ class Html5AudioPlayer extends JustAudioPlayer {
   AudioSourcePlayer? _audioSourcePlayer;
   LoopModeMessage _loopMode = LoopModeMessage.off;
   bool _shuffleModeEnabled = false;
-  final _kMaxRecoverFatalAttempts = 5;
+  final _kMaxRecoverFatalAttempts = 10;
   int _recoverFatalAttemptsCount = 0;
   final Map<String, AudioSourcePlayer> _audioSourcePlayers = {};
   Hls? _hls;
@@ -176,13 +176,13 @@ class Html5AudioPlayer extends JustAudioPlayer {
   void _restoreStreamOnError(
       {required int currentPositionMillis, required bool isFatal}) {
     logHLS(
-        '_restoreStreamOnError currentPositionMillis: $currentPositionMillis');
+        '_restoreStreamOnError currentPositionMillis: $currentPositionMillis, _recoverFatalAttemptsCount: $_recoverFatalAttemptsCount');
     if (_hls == null) {
       return;
     }
     _recoverFatalAttemptsCount++;
     final targetPosition =
-        math.max(0, currentPositionMillis + 10 + _recoverFatalAttemptsCount);
+        math.max(0, currentPositionMillis + 10 + (_recoverFatalAttemptsCount * 10));
     _hls!.swapAudioCodec();
     _hls!.recoverMediaError();
     _hls!.currentLevel = _hls!.currentLevel;
@@ -235,7 +235,7 @@ class Html5AudioPlayer extends JustAudioPlayer {
             progressive: false,
             appendErrorMaxRetry: 5,
             lowLatencyMode: true,
-            backBufferLength: 600,
+            backBufferLength: 90,
             xhrSetup: allowInterop(
               (HttpRequest xhr, String _) {
                 xhr.withCredentials = false;
