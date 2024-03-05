@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 
-bool isLogEnabled = true;
+bool isLogEnabled = false;
 
 void logHLS(String? message) {
   if (!isLogEnabled) {
