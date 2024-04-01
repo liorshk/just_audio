@@ -975,7 +975,7 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
         player.setPlaybackParameters(new PlaybackParameters(speed, params.pitch));
         if (player.getPlayWhenReady())
             updatePosition();
-        subs();
+        enqueuePlaybackEvent();
     }
 
     public void setPitch(final float pitch) {
