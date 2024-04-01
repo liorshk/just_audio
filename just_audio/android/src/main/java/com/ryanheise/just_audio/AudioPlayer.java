@@ -367,24 +367,29 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
     public void onPlayerError(PlaybackException error) {
         if (error instanceof ExoPlaybackException) {
             final ExoPlaybackException exoError = (ExoPlaybackException)error;
+            Exception exception;
             switch (exoError.type) {
-            case ExoPlaybackException.TYPE_SOURCE:
-                Log.e(TAG, "TYPE_SOURCE: " + exoError.getSourceException().getMessage());
-                break;
+                case ExoPlaybackException.TYPE_SOURCE:
+                    exception = exoError.getSourceException();
+                    Log.e(TAG, "TYPE_SOURCE: " + exoError.getSourceException().getMessage());
+                    break;
 
-            case ExoPlaybackException.TYPE_RENDERER:
-                Log.e(TAG, "TYPE_RENDERER: " + exoError.getRendererException().getMessage());
-                break;
+                case ExoPlaybackException.TYPE_RENDERER:
+                    exception = exoError.getRendererException();
+                    Log.e(TAG, "TYPE_RENDERER: " + exoError.getRendererException().getMessage());
+                    break;
 
-            case ExoPlaybackException.TYPE_UNEXPECTED:
-                Log.e(TAG, "TYPE_UNEXPECTED: " + exoError.getUnexpectedException().getMessage());
-                break;
+                case ExoPlaybackException.TYPE_UNEXPECTED:
+                    exception = exoError.getUnexpectedException();
+                    Log.e(TAG, "TYPE_UNEXPECTED: " + exoError.getUnexpectedException().getMessage());
+                    break;
 
-            default:
-                Log.e(TAG, "default ExoPlaybackException: " + exoError.getUnexpectedException().getMessage());
+                default:
+                    exception = exoError.getUnexpectedException();
+                    Log.e(TAG, "default ExoPlaybackException: " + exoError.getUnexpectedException().getMessage());
             }
             // TODO: send both errorCode and type
-            sendError(String.valueOf(exoError.type), exoError.getMessage());
+            sendError(String.valueOf(exoError.type), exception.getMessage());
         } else {
             Log.e(TAG, "default PlaybackException: " + error.getMessage());
             sendError(String.valueOf(error.errorCode), error.getMessage());
@@ -970,7 +975,7 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
         player.setPlaybackParameters(new PlaybackParameters(speed, params.pitch));
         if (player.getPlayWhenReady())
             updatePosition();
-        enqueuePlaybackEvent();
+        subs();
     }
 
     public void setPitch(final float pitch) {
