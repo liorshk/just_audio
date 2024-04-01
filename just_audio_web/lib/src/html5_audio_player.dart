@@ -1,15 +1,15 @@
 import 'dart:async';
 import 'dart:html';
-import 'dart:js_interop';
+import 'dart:math' as math;
 import 'dart:ui_web' as ui;
 
 import 'package:flutter/services.dart';
 import 'package:js/js.dart';
 import 'package:just_audio_platform_interface/just_audio_platform_interface.dart';
+import 'package:just_audio_web/src/extra.dart';
 
 import 'audio_sources.dart';
 import 'base_just_audio_player.dart';
-import 'extra.dart';
 import 'hls.dart';
 import 'logger.dart';
 import 'play_pause_queue.dart';
@@ -22,7 +22,8 @@ class Html5AudioPlayer extends JustAudioPlayer {
   AudioSourcePlayer? _audioSourcePlayer;
   LoopModeMessage _loopMode = LoopModeMessage.off;
   bool _shuffleModeEnabled = false;
-  bool recoverAttempt = false;
+  final _kMaxRecoverFatalAttempts = 10;
+  int _recoverFatalAttemptsCount = 0;
   final Map<String, AudioSourcePlayer> _audioSourcePlayers = {};
   Hls? _hls;
   String? _currentUrl;
@@ -172,6 +173,31 @@ class Html5AudioPlayer extends JustAudioPlayer {
     return LoadResponse(duration: duration);
   }
 
+  void _restoreStreamOnError(
+      {required int currentPositionMillis, required bool isFatal}) {
+    logHLS(
+        '_restoreStreamOnError currentPositionMillis: $currentPositionMillis, _recoverFatalAttemptsCount: $_recoverFatalAttemptsCount');
+    if (_hls == null) {
+      return;
+    }
+    _recoverFatalAttemptsCount++;
+    final targetPosition =
+        math.max(0, currentPositionMillis + 10 + (_recoverFatalAttemptsCount * 10));
+    _hls!.swapAudioCodec();
+    _hls!.recoverMediaError();
+    _hls!.currentLevel = _hls!.currentLevel;
+
+    if (isFatal) {
+      _seek(targetPosition, null)
+          .then((value) => pause(PauseRequest()))
+          .then((_) => play(PlayRequest()));
+    } else {
+      _seek(currentPositionMillis, null)
+          .then((value) => pause(PauseRequest()))
+          .then((_) => play(PlayRequest()));
+    }
+  }
+
   /// Loads audio from [uri] and returns the duration of the loaded audio if
   /// known.
 
@@ -201,13 +227,15 @@ class Html5AudioPlayer extends JustAudioPlayer {
         audioElement.preload = 'auto';
         ui.platformViewRegistry.registerViewFactory(
             'audioPlayer-$id', (int viewId) => audioElement);
+        _recoverFatalAttemptsCount = 0;
         _hls = Hls(
           HlsConfig(
-            debug: false,
+            debug: true,
             enableWorker: true,
             progressive: false,
             appendErrorMaxRetry: 5,
             lowLatencyMode: true,
+            backBufferLength: 90,
             xhrSetup: allowInterop(
               (HttpRequest xhr, String _) {
                 xhr.withCredentials = false;
@@ -220,33 +248,36 @@ class Html5AudioPlayer extends JustAudioPlayer {
         _hls!.on('hlsMediaAttached', allowInterop((dynamic _, dynamic __) {
           logHLS('on hlsMediaAttached');
         }));
-        _hls!.on('hlsError', allowInterop((dynamic _, dynamic data) {
-          logHLS('Html5AudioPlayer on hlsError');
-          try {
-            final ErrorData errorData = ErrorData(data);
-            logHLS(
-                'error: ${errorData.type} ${errorData.fatal} ${errorData.details}');
-            if (errorData.fatal) {
-              if (!recoverAttempt) {
-                _hls!.recoverMediaError();
-                recoverAttempt = true;
+        _hls!.on(
+          'hlsError',
+          allowInterop(
+            (dynamic _, dynamic data) {
+              final ErrorData errorData = ErrorData.from(data);
+              logHLS('Html5AudioPlayer on hlsError: \n$errorData');
+              final positionMillis = getCurrentPosition().inMilliseconds;
+              if (errorData.fatal) {
+                if (_recoverFatalAttemptsCount < _kMaxRecoverFatalAttempts) {
+                  _restoreStreamOnError(
+                    currentPositionMillis: positionMillis,
+                    isFatal: errorData.fatal,
+                  );
+                } else {
+                  throw PlatformException(
+                    code: kErrorValueToErrorName[2]!,
+                    message: errorData.type,
+                    details: '${errorData.details}',
+                  );
+                }
               } else {
-                _hls!.swapAudioCodec();
-                _hls!.recoverMediaError();
-                recoverAttempt = false; // reset after second recovery attempt
+                _restoreStreamOnError(
+                  currentPositionMillis: positionMillis,
+                  isFatal: errorData.fatal,
+                );
               }
-              throw PlatformException(
-                code: kErrorValueToErrorName[2]!,
-                message: errorData.type,
-                details: '${errorData.details}',
-              );
-            }
-          } catch (e) {
-            logHLS('error not parsed: $e');
-            _hls!.recoverMediaError();
-          }
-          // TODO: better communicate this error to the just_audio client
-        }));
+            },
+            // TODO: better communicate this error to the just_audio client
+          ),
+        );
       } else {
         logHLS('Html5AudioPlayer NOT shouldUseHlsLibrary');
         _durationCompleter = Completer<dynamic>();
@@ -282,11 +313,8 @@ class Html5AudioPlayer extends JustAudioPlayer {
         _durationCompleter = null;
       }
     }
-    logHLS('loadUri 5');
     transition(ProcessingStateMessage.ready);
-    logHLS('loadUri finally 6');
     final seconds = audioElement.duration;
-    logHLS('loadUri finally 7');
     return seconds.isFinite
         ? Duration(milliseconds: (seconds * 1000).toInt())
         : null;
